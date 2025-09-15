@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<catalog xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog" prefer="system">
+    <system systemId="https://mr.eclaimlink.ae/SearchIdentity.svc?wsdl" uri="wsdl/mr.eclaimlink.ae/SearchIdentity.svc.wsdl"/>
+    <system systemId="https://mr.eclaimlink.ae/SearchIdentity.svc?xsd=xsd0" uri="wsdl/mr.eclaimlink.ae/SearchIdentity.svc.xsd_xsd0.xsd"/>
+    <system systemId="https://mr.eclaimlink.ae/SearchIdentity.svc?xsd=xsd1" uri="wsdl/mr.eclaimlink.ae/SearchIdentity.svc.xsd_xsd1.xsd"/>
+    <system systemId="https://mr.eclaimlink.ae/SearchIdentity.svc?xsd=xsd2" uri="wsdl/mr.eclaimlink.ae/SearchIdentity.svc.xsd_xsd2.xsd"/>
+</catalog>

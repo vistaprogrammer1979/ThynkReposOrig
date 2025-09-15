@@ -1,0 +1,89 @@
+/*
+To change this license header, choose License Headers in Project Properties.
+To change this template file, choose Tools | Templates
+and open the template in the editor.
+*/
+/* 
+    Created on : Mar 17, 2014, 5:14:38 PM
+    Author     : smutlak
+*/
+
+body
+{
+    height:1500px;
+    background: -webkit-linear-gradient(white, gray); /* For Safari 5.1 to 6.0 */
+    background: -o-linear-gradient(white, gray); /* For Opera 11.1 to 12.0 */
+    background: -moz-linear-gradient(white, gray); /* For Firefox 3.6 to 15 */
+    background: linear-gradient(white, gray); /* Standard syntax */
+    font-size: 10px ;
+    font-weight: 50;
+    margin: 0px;
+}
+
+.body_col1{
+    text-align: left;
+    width: 180px;
+    border: none;
+    vertical-align: top;
+}
+.body_col2{
+
+    border: none;
+    text-align: center;
+    vertical-align: top;
+}
+.header_title_col1{
+    width:15%;
+    text-align: left;
+}
+.header_title_col2{
+    text-align: center;
+
+    width: 70%;
+    border: none;
+    vertical-align: top;
+    color:  #026890;
+    font-size: 14px ;
+    font-weight: 700; 
+    text-shadow: 5px 5px 5px #999;
+    text-decoration: underline;
+}
+.header_title_col3{
+
+    width: 10%;
+    border: none;
+    text-align: right;
+    vertical-align: baseline;
+    font-size: 11px ;
+    font-weight: 100; 
+}
+.header_title_col4{
+
+    width: 5%;
+    border: none;
+    text-align: left;
+    vertical-align: baseline;
+    font-size: 10px ;
+    font-weight: 100; 
+}
+.menuPanel{
+    border: none;
+}
+
+
+.info_col1{
+    text-align: left;
+    font-size: 11px ;
+    font-weight: 150;
+    width:5%;
+    white-space: nowrap;
+}
+.info_col2{
+    text-align: left;
+    font-weight: 100;
+    font-size: 11px ;
+    width:15%;
+}
+.info_col3_sep{
+
+}

@@ -1,0 +1,12 @@
+# Build / outputs
+target/
+build/
+out/
+*.class
+*.log
+
+# IDE noise
+.idea/
+*.iml
+.nb-gradle/
+nb-configuration.xml

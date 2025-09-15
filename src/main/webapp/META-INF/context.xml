@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Context antiResourceLocking="true" path="/RulesEngine">
+  <ResourceLink global="jdbc/accumedDS" name="jdbc/accumedDS" type="com.mchange.v2.c3p0.ComboPooledDataSource"/>
+  <ResourceLink global="jdbc/rulesLoggingDS" name="jdbc/rulesLoggingDS" type="com.mchange.v2.c3p0.ComboPooledDataSource"/>
+  <ResourceLink global="jdbc/jiraDS" name="jdbc/jiraDS"/>
+  <ResourceLink global="com.accumed.rules_packages.dir" name="com.accumed.rules_packages.dir" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.initialDelay" name="com.accumed.rules.engine.initialDelay" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.repository.check.interval" name="com.accumed.rules.engine.repository.check.interval" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.workers.pool.min.size" name="com.accumed.rules.engine.workers.pool.min.size" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.workers.pool.max.size" name="com.accumed.rules.engine.workers.pool.max.size" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.logging.threads.max.count" name="com.accumed.rules.engine.logging.threads.max.count" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.logging.threads.warning.size" name="com.accumed.rules.engine.logging.threads.warning.size" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.logging.threads.max.size" name="com.accumed.rules.engine.logging.threads.max.size" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.logging.enabled" name="com.accumed.rules.engine.logging.enabled" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.max.wait.time.in.millis" name="com.accumed.rules.engine.max.wait.time.in.millis" type="java.lang.String"/>
+  <ResourceLink global="com.accumed.rules.engine.droolsfireDelay" name="com.accumed.rules.engine.droolsfireDelay" type="java.lang.String"/>
+</Context>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app version="4.0" xmlns="http://xmlns.jcp.org/xml/ns/javaee" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee                              http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd">
+    <listener>
+        <listener-class>com.accumed.webservices.BackgroundTaskManager</listener-class>
+    </listener>
+    <listener>
+        <listener-class>com.sun.xml.ws.transport.http.servlet.WSServletContextListener</listener-class>
+    </listener>
+    <servlet>
+        <servlet-name>jspActionsServlet</servlet-name>
+        <servlet-class>com.accumed.webservices.jspActionsServlet</servlet-class>
+    </servlet>
+    <servlet>
+        <servlet-name>AccumedValidator</servlet-name>
+        <servlet-class>com.sun.xml.ws.transport.http.servlet.WSServlet</servlet-class>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>jspActionsServlet</servlet-name>
+        <url-pattern>/jspActionsServlet</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>AccumedValidator</servlet-name>
+        <url-pattern>/AccumedValidator</url-pattern>
+    </servlet-mapping>
+    <session-config>
+        <session-timeout>
+            30
+        </session-timeout>
+    </session-config>
+    <context-param>
+        <param-name>javax.faces.DATETIMECONVERTER_DEFAULT_TIMEZONE_IS_SYSTEM_TIMEZONE</param-name>
+        <param-value>true</param-value>
+    </context-param>
+    <welcome-file-list>
+        <welcome-file>index.jsp</welcome-file>
+    </welcome-file-list>
+</web-app>
