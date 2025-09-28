@@ -7,5 +7,5 @@
 <%@page contentType="text/html" pageEncoding="windows-1256"%>
 <!DOCTYPE html>
  <html>
-   <body><i>version:[3.0.10.44]</i></body> 
+   <body><i>version:[3.0.10.45]</i></body> 
  </html>

@@ -125,20 +125,7 @@ public class CachedRepositoryService implements Runnable {
                     "DhaHCPCSCodes", "DhaICDCodes", "DhaServiceCodes","ICDContradictories", 
                     "CrossWalk_CPT","ICDExclusionMaster","ICDAcuteChronic","CrosswalkExclusion","STTFacilityNetworkMap","ICD10_AdditionalCodes"
                         };
-                /* "DhaDrugPrices","DeletedDrugs","LOINCS", "HaadCPTCodes", "HaadDentalCodes",
-                    "HaadDRGCodes", "HaadDrugCodes", "HaadHCPCSCodes", "HaadICDCodes",
-                    "HaadServiceCodes", "DhaCPTCodes", "DhaDentalCodes", "DhaDrugCodes",
-                    "DhaHCPCSCodes", "DhaICDCodes", "DhaServiceCodes","FacilitySchemas","ACode_OValue" 
-                *//*Deleted by Rasha 01-06-2020/*//*not used Any more*/
-                
-                
-                //14/May/2019 smutlak   remove --> , "ICDExclusion"
 
-                /*insertDentalCodeRequireToothNo*/ /*global variable*//*done*
-                /*insertDiagnosisGroups*/ /*global variable*//*done*//*problem*
-                /*insertCPTGroups*/ /*global variable*//*done*/
-                /*insertDamanBasicDrugs*/ /*global variable*/ /*deleted*
-                /*insertDamanBasicExclusions*/ /*global variable*//*Problem*/
 
                 for (String dataName : data) {
                     Logger.getLogger(DroolsUpdaterService.class.getName()).
@@ -167,6 +154,7 @@ public class CachedRepositoryService implements Runnable {
         AccumedValidatorWS.setCachedRepositoryService(this);
         DroolsUpdaterService.setCachedRepositoryService(this);
         WorkersFactory.setCachedRepositoryService(this);
+        com.accumed.re.agents.repo.SharedCachedRepository.set(repo);
     }
 
     public int reSynchronize() {

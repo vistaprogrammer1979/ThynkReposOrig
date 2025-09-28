@@ -18,15 +18,19 @@ import com.accumed.re.agents.CachedRepositoryService;
 import com.accumed.db.DB;
 import com.accumed.maintenance.LoginCheckProcessServlet;
 
+import java.util.*;
+import java.util.concurrent.*;
+
 import com.accumed.validation.Utils;
 
 import java.io.StringWriter;
-import java.util.Date;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.annotation.Resource;
 import javax.jws.WebMethod;
 import javax.jws.WebParam;
 import javax.jws.WebService;
+import javax.servlet.http.HttpServletRequest;
 import javax.xml.bind.JAXBContext;
 import com.accumed.model.scrubRequest.Claim;
 import com.accumed.model.scrubRequest.xclaim.XActivity;
@@ -40,13 +44,6 @@ import com.accumed.re.pool.WorkersFactory;
 import com.accumed.re.pool.WorkersPool;
 import java.io.IOException;
 import java.text.ParseException;
-import java.util.Iterator;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.LogManager;
@@ -56,6 +53,9 @@ import javax.naming.InitialContext;
 import javax.naming.NamingException;
 import javax.sql.DataSource;
 import javax.xml.bind.JAXBException;
+import javax.xml.ws.WebServiceContext;
+import javax.xml.ws.handler.MessageContext;
+
 import org.apache.commons.pool2.impl.AbandonedConfig;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.json.JSONArray;
@@ -69,9 +69,6 @@ import org.json.JSONObject;
 //@Stateless()
 public class AccumedValidatorWS {
 
-    //NEW
-//    @PersistenceContext(unitName = "LoggingPU")
-//    private EntityManager em;
     protected static CachedRepositoryService cachedRepositoryService;
     protected static WorkersPool workerPool;
     protected static boolean initialized = false;
@@ -84,87 +81,51 @@ public class AccumedValidatorWS {
     static int WORKERS_MAX_POOL_SIZE;
     static int LOGGING_MAX_THREADS_COUNT;
 
+    private static final int DEFAULT_WORKERS_MIN_POOL_SIZE = 2;
+    private static final int DEFAULT_WORKERS_MAX_POOL_SIZE = 8;
+    private static final int DEFAULT_LOGGING_MAX_THREADS_COUNT = 6;
+    private static final int DEFAULT_LOGGING_WARNING_QUEUE_SIZE = 30;
+    private static final int DEFAULT_LOGGING_MAX_QUEUE_SIZE = 300;
+    private static final int DEFAULT_LOGGING_ENABLED = 1;
+
     private static int LOGGING_WARNING_QUEUE_SIZE;
     private static int LOGGING_MAX_QUEUE_SIZE;
-    private static int LOGGING_ENABLED = 1;
+
+    private static int LOGGING_ENABLED = DEFAULT_LOGGING_ENABLED;
+
 
     private static AtomicBoolean LOGGING_WARNING_QUEUE_SIZE_EMAIL_SENT = new AtomicBoolean(false);
     private static AtomicBoolean LOGGING_MAX_QUEUE_SIZE_EMAIL_SENT = new AtomicBoolean(false);
 
+    private static final String JNDI_WORKERS_MIN = "java:comp/env/com.accumed.rules.engine.workers.pool.min.size";
+    private static final String JNDI_WORKERS_MAX = "java:comp/env/com.accumed.rules.engine.workers.pool.max.size";
+    private static final String JNDI_LOGGING_THREADS_MAX = "java:comp/env/com.accumed.rules.engine.logging.threads.max.count";
+    private static final String JNDI_LOGGING_WARNING = "java:comp/env/com.accumed.rules.engine.logging.threads.warning.size";
+    private static final String JNDI_LOGGING_MAX = "java:comp/env/com.accumed.rules.engine.logging.threads.max.size";
+    private static final String JNDI_LOGGING_ENABLED = "java:comp/env/com.accumed.rules.engine.logging.enabled";
+    private static final String JNDI_POOL_WAIT = "java:comp/env/com.accumed.rules.engine.max.wait.time.in.millis";
+
+    private static final int LOGGING_QUEUE_WAIT_STEP_IN_MILLIS = 100;
+    private static final int LOGGING_QUEUE_MAX_WAIT_STEPS = 50;
+    private static final int WORKER_POOL_WAIT_STEP_IN_MILLIS = 100;
+    private static final int DEFAULT_POOL_MAX_WAIT_TIME_IN_MILLIS = 5000;
+    private static final long WORKER_POOL_MIN_EVICTABLE_IDLE_TIME_MILLIS = TimeUnit.MINUTES.toMillis(30);
+    private static final long WORKER_POOL_EVICTION_RUN_INTERVAL_MILLIS = TimeUnit.MINUTES.toMillis(10);
+    private static final long REQUEST_SURGE_WINDOW_IN_MILLIS = TimeUnit.MINUTES.toMillis(1);
+    private static int workerPoolMaxWaitSteps = 50;
+
     static int POOL_MAX_WAIT_TIME_IN_MILLIS;
 
-    static {
-        try {
-            WORKERS_MIN_POOL_SIZE = Integer.parseInt((String) (new InitialContext().lookup("java:comp/env/com.accumed.rules.engine.workers.pool.min.size")));
-        } catch (NumberFormatException | NamingException ex) {
-            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
-                    "exception caught", ex);
-        }
-        try {
-            WORKERS_MAX_POOL_SIZE = Integer.parseInt((String) (new InitialContext().lookup("java:comp/env/com.accumed.rules.engine.workers.pool.max.size")));
-        } catch (NumberFormatException | NamingException ex) {
-            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
-                    "exception caught", ex);
-        }
-        try {
-            LOGGING_MAX_THREADS_COUNT = Integer.parseInt((String) (new InitialContext().lookup("java:comp/env/com.accumed.rules.engine.logging.threads.max.count")));
-        } catch (NumberFormatException | NamingException ex) {
-            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
-                    "exception caught", ex);
-        }
-        try {
-            LOGGING_WARNING_QUEUE_SIZE = Integer.parseInt((String) (new InitialContext().lookup("java:comp/env/com.accumed.rules.engine.logging.threads.warning.size")));
-        } catch (NumberFormatException | NamingException ex) {
-            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
-                    "exception caught", ex);
-        }
-        try {
-            LOGGING_MAX_QUEUE_SIZE = Integer.parseInt((String) (new InitialContext().lookup("java:comp/env/com.accumed.rules.engine.logging.threads.max.size")));
-        } catch (NumberFormatException | NamingException ex) {
-            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
-                    "exception caught", ex);
-        }
+    private static Semaphore workerBorrowSemaphore;
+    private static final Object RECENT_REQUEST_LOCK = new Object();
+    private static final Deque<RequestArrival> RECENT_REQUESTS = new ArrayDeque<>();
+    private static final Map<String, Integer> RECENT_REQUEST_COUNT_BY_IP = new HashMap<>();
+    private static int recentRequestCount = 0;
 
-        try {
-            LOGGING_ENABLED = Integer.parseInt((String) (new InitialContext().lookup("java:comp/env/com.accumed.rules.engine.logging.enabled")));
-        } catch (NumberFormatException | NamingException ex) {
-            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
-                    "exception caught", ex);
-        }
-
-        try {
-            POOL_MAX_WAIT_TIME_IN_MILLIS = Integer.parseInt((String) (new InitialContext().lookup("java:comp/env/com.accumed.rules.engine.max.wait.time.in.millis")));
-        } catch (NumberFormatException | NamingException ex) {
-            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
-                    "exception caught", ex);
-
-            POOL_MAX_WAIT_TIME_IN_MILLIS = 15;
-            Logger.getLogger(AccumedValidatorWS.class
-                    .getName()).log(Level.INFO, "LOGGING_ENABLED={0}",
-                            new Object[]{POOL_MAX_WAIT_TIME_IN_MILLIS});
-
-        }
-
-        if (WORKERS_MIN_POOL_SIZE <= 0) {
-            WORKERS_MIN_POOL_SIZE = 1;
-        }
-        if (WORKERS_MAX_POOL_SIZE < WORKERS_MIN_POOL_SIZE) {
-            WORKERS_MAX_POOL_SIZE = -1;
-        }
-        if (LOGGING_MAX_THREADS_COUNT <= 0) {
-            LOGGING_MAX_THREADS_COUNT = 1;
-        }
-
-        Logger.getLogger(AccumedValidatorWS.class
-                .getName()).log(Level.INFO, "MIN_WORKERS_POOL_SIZE={0}, MAX_WORKERS_POOL_SIZE={1}",
-                        new Object[]{WORKERS_MIN_POOL_SIZE, WORKERS_MAX_POOL_SIZE});
-
-        Logger.getLogger(AccumedValidatorWS.class
-                .getName()).log(Level.INFO, "LOGGING_ENABLED={0}, POOL_MAX_WAIT_TIME_IN_MILLIS={1}",
-                        new Object[]{LOGGING_ENABLED, POOL_MAX_WAIT_TIME_IN_MILLIS});
-    }
-
-    //logger
+    private static final int MAX_SOURCE_IPS_IN_LOG = 5;
+    private static final int MAX_SOURCE_IP_LENGTH = 128;
+    private static final String UNKNOWN_SOURCE_IP = "unknown";
+    private static final Pattern SOURCE_IP_SANITIZE_PATTERN = Pattern.compile("[^0-9A-Za-z:.,_-]");
     protected static WorkLog minRequest;
     protected static WorkLog maxRequest;
     protected static Long averageClaimProcessTime;
@@ -175,6 +136,17 @@ public class AccumedValidatorWS {
     protected static long totalProcessedClaimsTime;
     protected static WorkLogger workLogger;
     //end logger
+    private static ConcurrentHashMap<String, RulesUser> users = new ConcurrentHashMap<String, RulesUser>();
+
+    private static ConcurrentHashMap<Integer, Exclusion> exclusions = new ConcurrentHashMap<Integer, Exclusion>();
+
+    private static ConcurrentHashMap<Integer, Category> Categories = new ConcurrentHashMap<Integer, Category>();
+
+    private static ConcurrentHashMap<Integer, RuleCategory> ruleCategories = new ConcurrentHashMap<Integer, RuleCategory>();
+    private static ConcurrentHashMap<String, String> ruleCats = new ConcurrentHashMap<String, String>();
+    public static ConcurrentHashMap<String, String> ruleRefrences = new ConcurrentHashMap<String, String>();
+
+    private static ValidatorStates<ValidatorState> validatorStates = new ValidatorStates<ValidatorState>();
 
     //OLD
 //    private long last = 0;
@@ -183,6 +155,376 @@ public class AccumedValidatorWS {
             + "<soapenv:Body>"
             + "<validate>";
     private static final String SUFFIX = "</validate> </soapenv:Body> </soapenv:Envelope>";
+
+
+    static {
+        InitialContext initialContext = null;
+        try {
+            initialContext = new InitialContext();
+        } catch (NamingException ex) {
+            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.WARNING,
+                    "Unable to obtain InitialContext, using default configuration values.", ex);
+        }
+        Context context = initialContext;
+        WORKERS_MIN_POOL_SIZE = lookupInt(context, JNDI_WORKERS_MIN, DEFAULT_WORKERS_MIN_POOL_SIZE);
+        WORKERS_MAX_POOL_SIZE = lookupInt(context, JNDI_WORKERS_MAX, DEFAULT_WORKERS_MAX_POOL_SIZE);
+        LOGGING_MAX_THREADS_COUNT = lookupInt(context, JNDI_LOGGING_THREADS_MAX, DEFAULT_LOGGING_MAX_THREADS_COUNT);
+        LOGGING_WARNING_QUEUE_SIZE = lookupInt(context, JNDI_LOGGING_WARNING, DEFAULT_LOGGING_WARNING_QUEUE_SIZE);
+        LOGGING_MAX_QUEUE_SIZE = lookupInt(context, JNDI_LOGGING_MAX, DEFAULT_LOGGING_MAX_QUEUE_SIZE);
+        LOGGING_ENABLED = lookupInt(context, JNDI_LOGGING_ENABLED, DEFAULT_LOGGING_ENABLED);
+        POOL_MAX_WAIT_TIME_IN_MILLIS = lookupInt(context, JNDI_POOL_WAIT, DEFAULT_POOL_MAX_WAIT_TIME_IN_MILLIS);
+
+        if (initialContext != null) {
+            try {
+                initialContext.close();
+            } catch (NamingException ex) {
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.FINE,
+                        "Failed to close InitialContext after configuration lookup.", ex);
+            }
+        }
+        normalizeConfiguration();
+
+    }
+
+    @Resource
+    private WebServiceContext webServiceContext;
+
+    private static final class RequestArrival {
+
+        final long timestamp;
+        final String sourceIp;
+
+        RequestArrival(long timestamp, String sourceIp) {
+            this.timestamp = timestamp;
+            this.sourceIp = sourceIp;
+        }
+    }
+    private static final class RequestSurgeStats {
+
+        final int count;
+        final long earliestTimestamp;
+        final long latestTimestamp;
+        final Map<String, Integer> countsByIp;
+
+        RequestSurgeStats(int count, long earliestTimestamp, long latestTimestamp, Map<String, Integer> countsByIp) {
+            this.count = count;
+            this.earliestTimestamp = earliestTimestamp;
+            this.latestTimestamp = latestTimestamp;
+            this.countsByIp = countsByIp;
+        }
+    }
+
+    private static void decrementSourceIpCount(String sourceIp) {
+        if (sourceIp == null || sourceIp.isEmpty()) {
+            return;
+        }
+
+        Integer current = RECENT_REQUEST_COUNT_BY_IP.get(sourceIp);
+        if (current == null) {
+            return;
+        }
+
+        if (current <= 1) {
+            RECENT_REQUEST_COUNT_BY_IP.remove(sourceIp);
+        } else {
+            RECENT_REQUEST_COUNT_BY_IP.put(sourceIp, current - 1);
+        }
+    }
+
+    private static void pruneOldRequests(long cutoffTimestamp) {
+        while (!RECENT_REQUESTS.isEmpty()) {
+            RequestArrival oldest = RECENT_REQUESTS.peekFirst();
+            if (oldest == null || oldest.timestamp >= cutoffTimestamp) {
+                break;
+            }
+            RECENT_REQUESTS.removeFirst();
+            decrementSourceIpCount(oldest.sourceIp);
+            if (recentRequestCount > 0) {
+                recentRequestCount--;
+            }
+        }
+    }
+
+    private static void recordRequestArrival(long timestamp, String sourceIp) {
+        synchronized (RECENT_REQUEST_LOCK) {
+            pruneOldRequests(timestamp - REQUEST_SURGE_WINDOW_IN_MILLIS);
+            String sanitizedSourceIp = sanitizeSourceIp(sourceIp);
+            RECENT_REQUESTS.addLast(new RequestArrival(timestamp, sanitizedSourceIp));
+            Integer existingCount = RECENT_REQUEST_COUNT_BY_IP.get(sanitizedSourceIp);
+            if (existingCount == null) {
+                RECENT_REQUEST_COUNT_BY_IP.put(sanitizedSourceIp, 1);
+            } else {
+                RECENT_REQUEST_COUNT_BY_IP.put(sanitizedSourceIp, existingCount + 1);
+            }
+            recentRequestCount++;
+        }
+    }
+    private static RequestSurgeStats captureRecentRequestStats(long now) {
+        synchronized (RECENT_REQUEST_LOCK) {
+            pruneOldRequests(now - REQUEST_SURGE_WINDOW_IN_MILLIS);
+            if (RECENT_REQUESTS.isEmpty()) {
+                return new RequestSurgeStats(0, now, now, Collections.emptyMap());
+            }
+            return new RequestSurgeStats(recentRequestCount,
+                    RECENT_REQUESTS.peekFirst().timestamp,
+                    RECENT_REQUESTS.peekLast().timestamp,
+                    new LinkedHashMap<>(RECENT_REQUEST_COUNT_BY_IP));
+        }
+    }
+
+    private static void logRecentRequestVolume(long requestThreadId, long requestStartTimeInMillis, String reason, String sourceIp) {
+        long now = System.currentTimeMillis();
+        RequestSurgeStats stats = captureRecentRequestStats(now);
+        if (stats.count <= 0) {
+            return;
+        }
+
+        Logger logger = Logger.getLogger(AccumedValidatorWS.class.getName());
+        String sanitizedSourceIp = sanitizeSourceIp(sourceIp);
+        String topSourceSummary = summarizeTopSourceIps(stats.countsByIp);
+        logger.log(Level.WARNING,
+                "Recent request spike detected ({0}). Received {1} requests between {2} and {3}. Top sources: {4}. Latest source: {5}.",
+                new Object[]{reason, stats.count, new Date(stats.earliestTimestamp), new Date(stats.latestTimestamp),
+                        topSourceSummary, sanitizedSourceIp});
+
+        LogInfo(requestThreadId,
+                "Recent requests (" + reason + ") in last " + REQUEST_SURGE_WINDOW_IN_MILLIS + " ms: " + stats.count
+                        + ", latest source: " + sanitizedSourceIp + ", top sources: " + topSourceSummary,
+                now - requestStartTimeInMillis);
+    }
+
+    private static String sanitizeSourceIp(String sourceIp) {
+        if (sourceIp == null) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        String trimmed = sourceIp.trim();
+        if (trimmed.isEmpty()) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        String cleaned = SOURCE_IP_SANITIZE_PATTERN.matcher(trimmed).replaceAll("");
+        if (cleaned.isEmpty()) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        if (cleaned.length() > MAX_SOURCE_IP_LENGTH) {
+            cleaned = cleaned.substring(0, MAX_SOURCE_IP_LENGTH);
+        }
+
+        return cleaned;
+    }
+    private String resolveClientIpAddress() {
+        if (webServiceContext == null) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        MessageContext messageContext = webServiceContext.getMessageContext();
+        if (messageContext == null) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        Object requestObject = messageContext.get(MessageContext.SERVLET_REQUEST);
+        if (!(requestObject instanceof HttpServletRequest)) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        HttpServletRequest servletRequest = (HttpServletRequest) requestObject;
+        String ip = extractFirstValidIp(servletRequest.getHeader("X-Forwarded-For"));
+        if (UNKNOWN_SOURCE_IP.equals(ip)) {
+            ip = sanitizeSourceIp(servletRequest.getHeader("X-Real-IP"));
+        }
+        if (UNKNOWN_SOURCE_IP.equals(ip)) {
+            ip = sanitizeSourceIp(servletRequest.getRemoteAddr());
+        }
+        if (UNKNOWN_SOURCE_IP.equals(ip)) {
+            ip = sanitizeSourceIp(servletRequest.getRemoteHost());
+        }
+        return ip;
+    }
+
+
+    private static String extractFirstValidIp(String headerValue) {
+        if (headerValue == null) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        String[] parts = headerValue.split(",");
+        for (String part : parts) {
+            String candidate = sanitizeSourceIp(part);
+            if (!UNKNOWN_SOURCE_IP.equals(candidate)) {
+                return candidate;
+            }
+        }
+
+        return UNKNOWN_SOURCE_IP;
+    }
+
+
+    private static String summarizeTopSourceIps(Map<String, Integer> countsByIp) {
+        if (countsByIp == null || countsByIp.isEmpty()) {
+            return UNKNOWN_SOURCE_IP;
+        }
+
+        List<Map.Entry<String, Integer>> entries = new ArrayList<>(countsByIp.entrySet());
+        Collections.sort(entries, new Comparator<Map.Entry<String, Integer>>() {
+            @Override
+            public int compare(Map.Entry<String, Integer> o1, Map.Entry<String, Integer> o2) {
+                int valueCompare = o2.getValue().compareTo(o1.getValue());
+                if (valueCompare != 0) {
+                    return valueCompare;
+                }
+                return o1.getKey().compareTo(o2.getKey());
+            }
+        });
+
+        StringBuilder summary = new StringBuilder();
+        int limit = Math.min(entries.size(), MAX_SOURCE_IPS_IN_LOG);
+        for (int i = 0; i < limit; i++) {
+            Map.Entry<String, Integer> entry = entries.get(i);
+            if (i > 0) {
+                summary.append(", ");
+            }
+            summary.append(entry.getKey()).append('=').append(entry.getValue());
+        }
+
+        if (entries.size() > limit) {
+            summary.append(" (+").append(entries.size() - limit).append(" more)");
+        }
+
+        return summary.toString();
+    }
+
+
+
+
+
+        private static void logAdjustedValue(String key, int configuredValue, int effectiveValue, String reason) {
+            if (configuredValue == effectiveValue) {
+                return;
+            }
+            String suffix = (reason == null || reason.trim().isEmpty()) ? "" : " (" + reason.trim() + ")";
+            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.INFO,
+                    "Adjusted {0} from {1} to {2}{3}.",
+                    new Object[]{key, configuredValue, effectiveValue, suffix});
+        }
+    private static int lookupInt(Context context, String name, int defaultValue) {
+        if (context == null) {
+            return defaultValue;
+        }
+        Object rawValue;
+        try {
+
+            rawValue = context.lookup(name);
+        } catch (NamingException ex) {
+            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.INFO,
+                    "JNDI lookup for {0} failed. Using default {1}.",
+                    new Object[]{name, defaultValue});
+            return defaultValue;
+        }
+
+            if (rawValue == null) {
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.INFO,
+                        "JNDI value for {0} is not set. Using default {1}.",
+                        new Object[]{name, defaultValue});
+                return defaultValue;
+            }
+
+
+                String value = rawValue.toString().trim();
+                if (value.isEmpty()) {
+                    Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.INFO,
+                            "JNDI value for {0} is empty. Using default {1}.",
+                            new Object[]{name, defaultValue});
+                    return defaultValue;
+                }
+
+                try {
+
+                    return Integer.parseInt(value);
+                } catch (NumberFormatException ex) {
+                    Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.WARNING,
+                            "Unable to parse integer from JNDI value '{1}' for {0}. Using default {2}.",
+                            new Object[]{name, value, defaultValue});
+                    return defaultValue;
+                }
+            }
+    private static int normalizePositiveConfig(String key, int configuredValue, int defaultValue) {
+        if (configuredValue > 0) {
+            return configuredValue;
+        }
+        Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.WARNING,
+                "Configured {0} value {1} is invalid. Using {2} instead.",
+                new Object[]{key, configuredValue, defaultValue});
+        return defaultValue;
+    }
+
+    private static int normalizeNonNegativeConfig(String key, int configuredValue, int fallbackValue, boolean allowZero) {
+        if (configuredValue > 0 || (allowZero && configuredValue == 0)) {
+            return configuredValue;
+        }
+        Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.WARNING,
+                "Configured {0} value {1} is invalid. Using {2} instead.",
+                new Object[]{key, configuredValue, fallbackValue});
+        return fallbackValue;
+    }
+    private static void normalizeConfiguration() {
+        int configuredMin = WORKERS_MIN_POOL_SIZE;
+        int configuredMax = WORKERS_MAX_POOL_SIZE;
+        int configuredLoggingThreads = LOGGING_MAX_THREADS_COUNT;
+        int configuredWarningQueue = LOGGING_WARNING_QUEUE_SIZE;
+        int configuredMaxQueue = LOGGING_MAX_QUEUE_SIZE;
+        int configuredLoggingEnabled = LOGGING_ENABLED;
+        int configuredPoolWait = POOL_MAX_WAIT_TIME_IN_MILLIS;
+
+        WORKERS_MIN_POOL_SIZE = normalizePositiveConfig(JNDI_WORKERS_MIN, WORKERS_MIN_POOL_SIZE, DEFAULT_WORKERS_MIN_POOL_SIZE);
+        LOGGING_MAX_THREADS_COUNT = normalizePositiveConfig(JNDI_LOGGING_THREADS_MAX, LOGGING_MAX_THREADS_COUNT, DEFAULT_LOGGING_MAX_THREADS_COUNT);
+        WORKERS_MAX_POOL_SIZE = normalizePositiveConfig(JNDI_WORKERS_MAX, WORKERS_MAX_POOL_SIZE,
+                Math.max(DEFAULT_WORKERS_MAX_POOL_SIZE, WORKERS_MIN_POOL_SIZE));
+        if (WORKERS_MAX_POOL_SIZE < WORKERS_MIN_POOL_SIZE) {
+
+            logAdjustedValue(JNDI_WORKERS_MAX, configuredMax, WORKERS_MIN_POOL_SIZE,
+                    "max pool size cannot be less than min pool size");
+            WORKERS_MAX_POOL_SIZE = WORKERS_MIN_POOL_SIZE;
+        }
+
+
+            LOGGING_WARNING_QUEUE_SIZE = normalizeNonNegativeConfig(JNDI_LOGGING_WARNING, LOGGING_WARNING_QUEUE_SIZE, 0, true);
+            LOGGING_MAX_QUEUE_SIZE = normalizePositiveConfig(JNDI_LOGGING_MAX, LOGGING_MAX_QUEUE_SIZE,
+                    Math.max(DEFAULT_LOGGING_MAX_QUEUE_SIZE,
+                            Math.max(LOGGING_WARNING_QUEUE_SIZE, LOGGING_MAX_THREADS_COUNT)));
+            if (LOGGING_MAX_QUEUE_SIZE < LOGGING_WARNING_QUEUE_SIZE) {
+                logAdjustedValue(JNDI_LOGGING_MAX, configuredMaxQueue, LOGGING_WARNING_QUEUE_SIZE,
+                        "max queue cannot be lower than warning threshold");
+                LOGGING_MAX_QUEUE_SIZE = LOGGING_WARNING_QUEUE_SIZE;
+            }
+
+                LOGGING_ENABLED = normalizeNonNegativeConfig(JNDI_LOGGING_ENABLED, LOGGING_ENABLED, DEFAULT_LOGGING_ENABLED, true);
+
+                 POOL_MAX_WAIT_TIME_IN_MILLIS = normalizePositiveConfig(JNDI_POOL_WAIT, POOL_MAX_WAIT_TIME_IN_MILLIS,
+                    DEFAULT_POOL_MAX_WAIT_TIME_IN_MILLIS);
+            if (POOL_MAX_WAIT_TIME_IN_MILLIS < WORKER_POOL_WAIT_STEP_IN_MILLIS) {
+                logAdjustedValue(JNDI_POOL_WAIT, configuredPoolWait, WORKER_POOL_WAIT_STEP_IN_MILLIS,
+                        "wait budget cannot be smaller than wait step");
+                POOL_MAX_WAIT_TIME_IN_MILLIS = WORKER_POOL_WAIT_STEP_IN_MILLIS;
+            }
+
+            workerPoolMaxWaitSteps = Math.max(1,
+                    (int) Math.ceil((double) POOL_MAX_WAIT_TIME_IN_MILLIS / WORKER_POOL_WAIT_STEP_IN_MILLIS));
+
+            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.INFO,
+                    "Worker pool configuration -> min={0} (configured {1}), max={2} (configured {3}), waitMillis={4} (configured {5}), waitSteps={6}",
+                    new Object[]{WORKERS_MIN_POOL_SIZE, configuredMin, WORKERS_MAX_POOL_SIZE, configuredMax,
+                            POOL_MAX_WAIT_TIME_IN_MILLIS, configuredPoolWait, workerPoolMaxWaitSteps});
+
+            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.INFO,
+                    "Logging queue configuration -> warning={0} (configured {1}), max={2} (configured {3}), threads={4} (configured {5}), loggingEnabled={6} (configured {7})",
+                    new Object[]{LOGGING_WARNING_QUEUE_SIZE, configuredWarningQueue, LOGGING_MAX_QUEUE_SIZE, configuredMaxQueue,
+                            LOGGING_MAX_THREADS_COUNT, configuredLoggingThreads, LOGGING_ENABLED, configuredLoggingEnabled});
+
+            resetWorkerPermitSemaphore();
+        }
+    //logger
 
     class RulesUser {
 
@@ -197,23 +539,18 @@ public class AccumedValidatorWS {
         }
 
     }
-    private static ConcurrentHashMap<String, RulesUser> users = new ConcurrentHashMap<String, RulesUser>();
 
-    private static ConcurrentHashMap<Integer, Exclusion> exclusions = new ConcurrentHashMap<Integer, Exclusion>();
 
-    private static ConcurrentHashMap<Integer, Category> Categories = new ConcurrentHashMap<Integer, Category>();
-
-    private static ConcurrentHashMap<Integer, RuleCategory> ruleCategories = new ConcurrentHashMap<Integer, RuleCategory>();
-    private static ConcurrentHashMap<String, String> ruleCats = new ConcurrentHashMap<String, String>();
-    public static ConcurrentHashMap<String, String> ruleRefrences = new ConcurrentHashMap<String, String>();
-
-    private static ValidatorStates<ValidatorState> validatorStates = new ValidatorStates<ValidatorState>();
-
+//    public static ThreadPoolExecutor saveFixedPool
+//            = //(ThreadPoolExecutor)Executors.newFixedThreadPool(1);
+//            new ThreadPoolExecutor(0, LOGGING_MAX_THREADS_COUNT,
+//                    0L, TimeUnit.MILLISECONDS,
+//                    new LinkedBlockingQueue<Runnable>());
     public static ThreadPoolExecutor saveFixedPool
             = //(ThreadPoolExecutor)Executors.newFixedThreadPool(1);
             new ThreadPoolExecutor(0, LOGGING_MAX_THREADS_COUNT,
                     0L, TimeUnit.MILLISECONDS,
-                    new LinkedBlockingQueue<Runnable>());
+                    new LinkedBlockingQueue<Runnable>(LOGGING_MAX_QUEUE_SIZE));
 
     public static ScheduledExecutorService returnFixedPool = Executors.newScheduledThreadPool(WORKERS_MIN_POOL_SIZE);
     /*= new ThreadPoolExecutor(0, WORKERS_MAX_POOL_SIZE < 2 ? 10 : WORKERS_MAX_POOL_SIZE,
@@ -226,34 +563,17 @@ public class AccumedValidatorWS {
     public AccumedValidatorWS() {
         cachedRepositoryService = null;
         validatorStateExecutor.scheduleAtFixedRate(new AccumedValidatorWS.ValidatorStateTask(), 5, 1, TimeUnit.MINUTES);
-//        workerPool = new WorkersPool(new WorkersFactory());
-//        AbandonedConfig abandonedConfig = new AbandonedConfig();
-//        abandonedConfig.setRemoveAbandonedOnMaintenance(true);
-//        abandonedConfig.setRemoveAbandonedTimeout(60 * 5); //5 minutes
-//        abandonedConfig.setLogAbandoned(true);
-//        workerPool.setAbandonedConfig(abandonedConfig);
-//        workerPool.setMinEvictableIdleTimeMillis(1000 * 60 * 7); //7 minutes
-//        workerPool.setTimeBetweenEvictionRunsMillis(1000 * 60 * 7); //7 minutes
-//        workerPool.setTestWhileIdle(true);
-//        workerPool.setMinIdle(MIN_WORKERS_POOL_SIZE);
+
     }
 
-//    public final void initializePool() {
-////        if (workerPool != null) {
-////            workerPool.clear();
-////            workerPool.close();
-////            workerPool = null;
-////        }
-//        workerPool = new GenericObjectPool<>(new WorkersFactory());
-//        AbandonedConfig abandonedConfig = new AbandonedConfig();
-//        abandonedConfig.setRemoveAbandonedOnMaintenance(true);
-//        abandonedConfig.setRemoveAbandonedTimeout(60 * 5); //5 minutes
-//        abandonedConfig.setLogAbandoned(true);
-//        workerPool.setAbandonedConfig(abandonedConfig);
-////        workerPool.setMinIdle(1);
-//    }
     public static void setCachedRepositoryService(CachedRepositoryService cachedRepositoryService) {
+        //AccumedValidatorWS.cachedRepositoryService = cachedRepositoryService;
         AccumedValidatorWS.cachedRepositoryService = cachedRepositoryService;
+        if (cachedRepositoryService != null) {
+            com.accumed.re.agents.repo.SharedCachedRepository.set(cachedRepositoryService.getRepo());
+        } else {
+            com.accumed.re.agents.repo.SharedCachedRepository.set(null);
+        }
         internalInitialize();
     }
 
@@ -287,58 +607,24 @@ public class AccumedValidatorWS {
                 workerPool.clear();
                 workerPool.close();
             }
-
             GenericObjectPoolConfig conf = new GenericObjectPoolConfig();
-            conf.setFairness(true);
-            conf.setBlockWhenExhausted(false);
-            //conf.setMinIdle(WORKERS_MIN_POOL_SIZE);
-            conf.setNumTestsPerEvictionRun(1);
-            conf.setMinEvictableIdleTimeMillis(1000 * 60 * 30); //30 minutes
-            conf.setSoftMinEvictableIdleTimeMillis(1000 * 60 * 30); //30 minutes
-            conf.setTimeBetweenEvictionRunsMillis(1000 * 60 * 10); //10 minutes
-            
-            
-            conf.setTestWhileIdle(true);
-//            workerPool.setTestOnReturn(true);
-            conf.setMaxWaitMillis(POOL_MAX_WAIT_TIME_IN_MILLIS);
-            conf.setBlockWhenExhausted(false);
-            conf.setMinIdle(WORKERS_MIN_POOL_SIZE);
 
-            if (WORKERS_MAX_POOL_SIZE > 1) {
-                conf.setMaxTotal(WORKERS_MAX_POOL_SIZE);
-            } else {
-                conf.setMaxTotal(1000);
-            }
-            
+            applyWorkerPoolConfig(conf);
             //workerPool = new WorkersPool(new WorkersFactory(), conf);
             workerPool = new WorkersPool(new WorkersFactory(), conf);
+            applyWorkerPoolRuntimeSettings(workerPool);
+            resetWorkerPermitSemaphore();
             AbandonedConfig abandonedConfig = new AbandonedConfig();
             abandonedConfig.setRemoveAbandonedOnMaintenance(true);
             abandonedConfig.setRemoveAbandonedTimeout(60 * 5); //5 minutes
             abandonedConfig.setLogAbandoned(true);
             workerPool.setAbandonedConfig(abandonedConfig);
 
-            workerPool.setNumTestsPerEvictionRun(1);
-            workerPool.setMinEvictableIdleTimeMillis(1000 * 60 * 30); //30 minutes
-            workerPool.setSoftMinEvictableIdleTimeMillis(1000 * 60 * 30); //30 minutes
-            workerPool.setTimeBetweenEvictionRunsMillis(1000 * 60 * 10); //10 minutes
 
-
-            workerPool.setTestWhileIdle(true);
-//            workerPool.setTestOnReturn(true);
-
-            workerPool.setMaxWaitMillis(POOL_MAX_WAIT_TIME_IN_MILLIS);
-            workerPool.setBlockWhenExhausted(false);
-            workerPool.setMinIdle(WORKERS_MIN_POOL_SIZE);
-
-            if (WORKERS_MAX_POOL_SIZE > 1) {
-                workerPool.setMaxTotal(WORKERS_MAX_POOL_SIZE);
-            } else {
-                workerPool.setMaxTotal(1000);
-            }
-
+//            workerPool.setMaxIdle(WORKERS_MAX_POOL_SIZE);
+//            workerPool.setMaxTotal(WORKERS_MAX_POOL_SIZE);
             workerPool.preparePool();
-            workerPool.preparePool();
+            //workerPool.preparePool();
 
             try {
                 while (AccumedValidatorWS.workerPool.getCount() < 1) {
@@ -387,6 +673,153 @@ public class AccumedValidatorWS {
         return "Done";
     }
 
+    private void submitLoggingTask(Runnable task, long requestThreadId, long startTimeInMillis, String sourceIp, String context) {
+        if (saveFixedPool == null) {
+            return;
+        }
+
+        String taskContext = (context == null || context.trim().isEmpty()) ? "logging" : context.trim();
+        try {
+            saveFixedPool.submit(task);
+        } catch (RejectedExecutionException ex) {
+            int currentSize = saveFixedPool.getQueue().size();
+            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
+                    "Logging queue is full ('{'{0}/{1}'}') while submitting {2} task. Dropping logging work.",
+                    new Object[]{currentSize, LOGGING_MAX_QUEUE_SIZE, taskContext});
+            if (LOGGING_MAX_QUEUE_SIZE_EMAIL_SENT.compareAndSet(false, true)) {
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
+                        "Logging queue size is high ='{'{0}'}' Request will NOT be processed", currentSize);
+            }
+            if (requestThreadId >= 0) {
+                logRecentRequestVolume(requestThreadId, startTimeInMillis,
+                        taskContext + " logging queue rejection", sourceIp);
+            }
+        }
+    }
+
+    private void submitLoggingTask(Runnable task) {
+        submitLoggingTask(task, -1L, 0L, UNKNOWN_SOURCE_IP, "logging");
+    }
+    private static void resetWorkerPermitSemaphore() {
+        int permits = WORKERS_MAX_POOL_SIZE;
+        if (workerPool != null) {
+            int poolMax = workerPool.getMaxTotal();
+            if (poolMax > 0) {
+                permits = poolMax;
+            }
+        }
+        if (permits <= 0) {
+            permits = Math.max(1, Math.max(WORKERS_MAX_POOL_SIZE, WORKERS_MIN_POOL_SIZE));
+        }
+        workerBorrowSemaphore = new Semaphore(permits, true);
+    }
+
+    private static void releaseWorkerPermit() {
+        if (workerBorrowSemaphore != null) {
+            workerBorrowSemaphore.release();
+        }
+    }
+
+
+    private static void applyWorkerPoolConfig(GenericObjectPoolConfig conf) {
+        conf.setFairness(true);
+        conf.setBlockWhenExhausted(true);
+        conf.setNumTestsPerEvictionRun(1);
+        conf.setMinEvictableIdleTimeMillis(WORKER_POOL_MIN_EVICTABLE_IDLE_TIME_MILLIS);
+        conf.setSoftMinEvictableIdleTimeMillis(WORKER_POOL_MIN_EVICTABLE_IDLE_TIME_MILLIS);
+        conf.setTimeBetweenEvictionRunsMillis(WORKER_POOL_EVICTION_RUN_INTERVAL_MILLIS);
+        conf.setTestWhileIdle(true);
+        conf.setMaxWaitMillis(POOL_MAX_WAIT_TIME_IN_MILLIS);
+        conf.setMinIdle(WORKERS_MIN_POOL_SIZE);
+        conf.setMaxIdle(WORKERS_MAX_POOL_SIZE);
+        conf.setMaxTotal(WORKERS_MAX_POOL_SIZE);
+    }
+
+    private static void applyWorkerPoolRuntimeSettings(WorkersPool pool) {
+        pool.setNumTestsPerEvictionRun(1);
+        pool.setMinEvictableIdleTimeMillis(WORKER_POOL_MIN_EVICTABLE_IDLE_TIME_MILLIS);
+        pool.setSoftMinEvictableIdleTimeMillis(WORKER_POOL_MIN_EVICTABLE_IDLE_TIME_MILLIS);
+        pool.setTimeBetweenEvictionRunsMillis(WORKER_POOL_EVICTION_RUN_INTERVAL_MILLIS);
+        pool.setTestWhileIdle(true);
+        pool.setMaxWaitMillis(POOL_MAX_WAIT_TIME_IN_MILLIS);
+        pool.setBlockWhenExhausted(true);
+        pool.setMinIdle(WORKERS_MIN_POOL_SIZE);
+        pool.setMaxIdle(WORKERS_MAX_POOL_SIZE);
+        pool.setMaxTotal(WORKERS_MAX_POOL_SIZE);
+    }
+
+
+
+
+    private boolean tryAcquireWorkerPermit(long requestThreadId, long startTimeInMillis, String context, String sourceIp) {
+        if (workerBorrowSemaphore == null) {
+            return true;
+        }
+
+        String trimmedContext = context == null ? "" : context.trim();
+        String contextLabel = trimmedContext.isEmpty() ? "request" : trimmedContext + " request";
+        String surgeReason = trimmedContext.isEmpty() ? "worker pool exhaustion" : trimmedContext + " worker pool exhaustion";
+
+        int maxWorkers = WORKERS_MAX_POOL_SIZE;
+        if (workerPool != null && workerPool.getMaxTotal() > 0) {
+            maxWorkers = workerPool.getMaxTotal();
+        }
+        if (maxWorkers <= 0) {
+            maxWorkers = Math.max(WORKERS_MIN_POOL_SIZE, 1);
+        }
+
+        int attempts = 0;
+        long waitedMillis = 0L;
+        boolean loggedWait = false;
+
+        try {
+            long remainingWait = POOL_MAX_WAIT_TIME_IN_MILLIS;
+            while (attempts < workerPoolMaxWaitSteps) {
+                long stepMillis = WORKER_POOL_WAIT_STEP_IN_MILLIS;
+                if (remainingWait > 0) {
+                    stepMillis = Math.min(stepMillis, remainingWait);
+                }
+
+                if (workerBorrowSemaphore.tryAcquire(stepMillis, TimeUnit.MILLISECONDS)) {
+                    if (loggedWait) {
+                        LogInfo(requestThreadId, "Worker became available after waiting.",
+                                System.currentTimeMillis() - startTimeInMillis);
+                    }
+                    return true;
+                }
+
+                attempts++;
+                waitedMillis += stepMillis;
+                if (remainingWait > 0) {
+                    remainingWait = Math.max(POOL_MAX_WAIT_TIME_IN_MILLIS - waitedMillis, 0);
+                }
+                if (!loggedWait) {
+                    logRecentRequestVolume(requestThreadId, startTimeInMillis, surgeReason, sourceIp);
+                    LogInfo(requestThreadId, "All workers are busy for " + contextLabel + ", waiting for an available worker.",
+                            System.currentTimeMillis() - startTimeInMillis);
+                    loggedWait = true;
+                }
+
+                if (remainingWait > 0 && waitedMillis >= POOL_MAX_WAIT_TIME_IN_MILLIS) {
+                    break;
+                }
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
+                    "Interrupted while waiting for an available worker for " + contextLabel + ".", ex);
+            logRecentRequestVolume(requestThreadId, startTimeInMillis, surgeReason,sourceIp);
+            return false;
+        }
+
+        Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.WARNING,
+                "No free worker became available for {2} after waiting {0} ms (max configured workers: {1}).",
+                new Object[]{POOL_MAX_WAIT_TIME_IN_MILLIS, maxWorkers, contextLabel});
+        logRecentRequestVolume(requestThreadId, startTimeInMillis, surgeReason,sourceIp);
+        return false;
+    }
+
+
     private static void AddSMTPLogger() {
         boolean bFound = false;
         Logger logger = Logger.getLogger(AccumedValidatorWS.class.getName());
@@ -410,6 +843,43 @@ public class AccumedValidatorWS {
         Logger.getLogger(AccumedValidatorWS.class.getName()).
                 log(Level.INFO, "{0} id:{1} time(ms):{2}", new Object[]{msg, id, timeInMilliSeconds});
     }
+    private boolean waitForLoggingQueueRecovery(long requestThreadId, long startTimeInMillis, String sourceIp) {
+        int attempts = 0;
+        while (saveFixedPool != null) {
+            int currentSize = saveFixedPool.getQueue().size();
+            if (currentSize < LOGGING_MAX_QUEUE_SIZE) {
+                if (attempts > 0) {
+                    LogInfo(requestThreadId, "Logging queue recovered after waiting.", System.currentTimeMillis() - startTimeInMillis);
+                }
+                return true;
+            }
+
+            if (attempts == 0) {
+                logRecentRequestVolume(requestThreadId, startTimeInMillis, "logging queue backlog", sourceIp);
+                LogInfo(requestThreadId, "Logging queue is high, waiting for it to drain.", System.currentTimeMillis() - startTimeInMillis);
+            }
+
+            if (attempts >= LOGGING_QUEUE_MAX_WAIT_STEPS) {
+                logRecentRequestVolume(requestThreadId, startTimeInMillis, "logging queue backlog timeout", sourceIp);
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.WARNING,
+                        "Logging queue size is still high '{'{0}'}' after waiting {1} ms.",
+                        new Object[]{currentSize, attempts * LOGGING_QUEUE_WAIT_STEP_IN_MILLIS});
+                return false;
+            }
+
+            attempts++;
+            try {
+                Thread.sleep(LOGGING_QUEUE_WAIT_STEP_IN_MILLIS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
+                        "Interrupted while waiting for logging queue to drain.", ex);
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     @WebMethod(operationName = "Scrub")
     public com.accumed.model.scrubRequest.ScrubRequest Scrub(
@@ -430,12 +900,14 @@ public class AccumedValidatorWS {
 
         long ltime = System.currentTimeMillis();
         long REQUEST_THREAD_UNIQUE_ID = REQUEST_THREAD_NEXT_ID.getAndIncrement();
-        LogInfo(REQUEST_THREAD_UNIQUE_ID, "started", 0);
+        String sourceIp = resolveClientIpAddress();
+        LogInfo(REQUEST_THREAD_UNIQUE_ID, "started (source IP: " + sourceIp + ")", 0);
 
         boolean logRequest = LoggingManager.getInstance().isLogRequest();
         if(logRequest)
             breUtils.saveRequest(request, true);
         AccumedValidatorWS.totalRequests++;
+        recordRequestArrival(ltime, sourceIp);
 
         long lBegin = System.currentTimeMillis();
         long lStart = lBegin;
@@ -469,8 +941,8 @@ public class AccumedValidatorWS {
 //            request.addOutcome("Missing [Claim.ProviderID]!!");
 //            return request;
 //        }
-          String facilityID=request.getClaim().getProviderID()==null?null:request.getClaim().getProviderID().trim();
-          if (!Utils.isFacilityAllowed(facilityID)) {
+        String facilityID=request.getClaim().getProviderID()==null?null:request.getClaim().getProviderID().trim();
+        if (!Utils.isFacilityAllowed(facilityID)) {
             request.removeAllOutcomes();
             request.addOutcome("Claims Scrubber trial license has expired. To renew your subscription please contact your ACCUMED Account Manager");
             if (request.getClaim() != null) {
@@ -487,15 +959,15 @@ public class AccumedValidatorWS {
 
         LogInfo(REQUEST_THREAD_UNIQUE_ID,
                 "Workers =" + (workerPool.getNumActive() + workerPool.getNumIdle())
-                + " Active=" + workerPool.getNumActive()
-                + " Idle=" + workerPool.getNumIdle(), System.currentTimeMillis() - ltime);
+                        + " Active=" + workerPool.getNumActive()
+                        + " Idle=" + workerPool.getNumIdle(), System.currentTimeMillis() - ltime);
 
         //New 18 Dec 2017
         int lgSize = saveFixedPool != null ? saveFixedPool.getQueue().size() : 0;
 
         LogInfo(REQUEST_THREAD_UNIQUE_ID, "Logging queue size =" + lgSize, System.currentTimeMillis() - ltime);
 
-        if (lgSize <= LOGGING_MAX_QUEUE_SIZE) {
+        if (lgSize < LOGGING_MAX_QUEUE_SIZE) {
             if (LOGGING_MAX_QUEUE_SIZE_EMAIL_SENT.compareAndSet(true, false)) {
 
                 Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
@@ -509,14 +981,28 @@ public class AccumedValidatorWS {
             }
         }
 
-        if (lgSize > LOGGING_MAX_QUEUE_SIZE) {
+        if (lgSize >= LOGGING_MAX_QUEUE_SIZE) {
             if (LOGGING_MAX_QUEUE_SIZE_EMAIL_SENT.compareAndSet(false, true)) {
                 Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
                         "Logging queue size is high ='{'{0}'}' Request will NOT be processed", lgSize);
             }
-            request.addOutcome("Service is busy.");
-            LogInfo(REQUEST_THREAD_UNIQUE_ID, "Service is busy.", System.currentTimeMillis() - ltime);
-            return request;
+
+            if (!waitForLoggingQueueRecovery(REQUEST_THREAD_UNIQUE_ID, ltime, sourceIp)) {
+                request.addOutcome("Service is busy.");
+                LogInfo(REQUEST_THREAD_UNIQUE_ID, "Service is busy.", System.currentTimeMillis() - ltime);
+                return request;
+            }
+
+            lgSize = saveFixedPool != null ? saveFixedPool.getQueue().size() : 0;
+
+            if (lgSize < LOGGING_MAX_QUEUE_SIZE && LOGGING_MAX_QUEUE_SIZE_EMAIL_SENT.compareAndSet(true, false)) {
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
+                        "Logging queue size is getting lower ='{'{0}'}' Rules Engine will start processing requests again.", lgSize);
+            }
+            if (lgSize <= LOGGING_WARNING_QUEUE_SIZE && LOGGING_WARNING_QUEUE_SIZE_EMAIL_SENT.compareAndSet(true, false)) {
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
+                        "Logging queue size is getting lower ='{'{0}'}' Rules Engine will re-monitor queue size.", lgSize);
+            }
         }
         //End New 18 Dec 2017
 
@@ -526,7 +1012,7 @@ public class AccumedValidatorWS {
         request.setAuthUser(user);
         LogInfo(REQUEST_THREAD_UNIQUE_ID, "Preparing request for processing completed.", System.currentTimeMillis() - ltime);
         //AddSMTPLogger();
-       // disabled by  Wael  upon  the  following  RULEPLAT-213,210,215 
+       // disabled by  Wael  upon  the  following  RULEPLAT-213,210,215
        //  if(!checkMandatoryFields(REQUEST_THREAD_UNIQUE_ID,request,ltime)) return request;
         request.setRequestTime(new Date());
 
@@ -536,6 +1022,8 @@ public class AccumedValidatorWS {
         java.sql.Connection conn = null;
         AccumedValidatorWS.ReturnThread returnThread = null;
         Boolean errorOccured = false;
+        boolean workerPermitAcquired = false;
+        boolean invalidateWorker = false;
         try {
             request.setTop20(0);
 
@@ -551,7 +1039,7 @@ public class AccumedValidatorWS {
                     query_db = new DB(conn);
                 }
                 LogInfo(REQUEST_THREAD_UNIQUE_ID, "Getting DB connection completed.", System.currentTimeMillis() - ltime);
-            } 
+            }
           // else {
 //                LogInfo(REQUEST_THREAD_UNIQUE_ID, "DB Rules are excluded.", System.currentTimeMillis() - ltime);
 //            }
@@ -563,6 +1051,13 @@ public class AccumedValidatorWS {
             beginTime = new Date();
 
             request.setRequestTime(beginTime);
+            if (!tryAcquireWorkerPermit(REQUEST_THREAD_UNIQUE_ID, ltime,"Scrub", sourceIp)) {
+                request.addOutcome("Service is busy.");
+                LogInfo(REQUEST_THREAD_UNIQUE_ID, "Service is busy.", System.currentTimeMillis() - ltime);
+                return request;
+            }
+
+            workerPermitAcquired = true;
 
             LogInfo(REQUEST_THREAD_UNIQUE_ID, "Getting worker...", System.currentTimeMillis() - ltime);
             worker = (Worker) workerPool.borrowObject();
@@ -570,7 +1065,7 @@ public class AccumedValidatorWS {
 
             LogInfo(REQUEST_THREAD_UNIQUE_ID, "Validating request by the worker...", System.currentTimeMillis() - ltime);
 
-            
+
 
             worker.validate(request, query_db,
                     excludeDBRules, debug);
@@ -578,8 +1073,10 @@ public class AccumedValidatorWS {
             long takenTime = System.currentTimeMillis() - lStart;
             LogInfo(REQUEST_THREAD_UNIQUE_ID, "Validating request by the worker completed", System.currentTimeMillis() - ltime);
 
-            returnThread = new AccumedValidatorWS.ReturnThread(worker, conn);
-            //returnFixedPool.submit(returnThread);
+            returnThread = new AccumedValidatorWS.ReturnThread(worker, conn, false, true);
+            workerPermitAcquired = false;
+            worker = null;
+            conn = null;
             returnFixedPool.schedule(returnThread, /*initialDelay*/ 10, TimeUnit.MILLISECONDS);
             Utils.setExclusions(request, exclusions);
               request = Utils.handleEmptyLongMsg(request);
@@ -621,12 +1118,12 @@ public class AccumedValidatorWS {
                                 .log(Level.SEVERE, "SEVERE: Logging queue size is high ='{'{0}'}'", lgSize);
                     }
                 }
-                
+
                 request=Utils.setReferenceLinks(request, AccumedValidatorWS.ruleRefrences);
                 request = Utils.setCategories(request, AccumedValidatorWS.ruleCats);
-                //Sameer Here
+//Sameer Here
                 AccumedValidatorWS.SaveThread saveThread = new AccumedValidatorWS.SaveThread(request); //need deep clone
-                saveFixedPool.submit(saveThread);
+                submitLoggingTask(saveThread, REQUEST_THREAD_UNIQUE_ID, ltime, sourceIp, "Scrub");
 
                 if (!Statistics.isLogHistory()) {
                     request.getClaim().setXclaim(null);
@@ -674,45 +1171,52 @@ public class AccumedValidatorWS {
             return request;
 
         } catch (java.util.NoSuchElementException e) {
-            if(e.getMessage() != null && !e.getMessage().equalsIgnoreCase("Pool exhausted")){
-                errorOccured = true;
-                request = HandleException(e, beginTime, request, 1);
-            }else{
+            boolean poolExhausted = e.getMessage() == null || e.getMessage().equalsIgnoreCase("Pool exhausted");
+            if (poolExhausted) {
                 Logger.getLogger(AccumedValidatorWS.class.getName())
                         .log(Level.SEVERE, "Server Exhausted.");
+                logRecentRequestVolume(REQUEST_THREAD_UNIQUE_ID, ltime,
+                        "worker pool exhausted while borrowing worker", sourceIp);
+                request = HandleException(e, beginTime, request, 1);
+            } else {
+                errorOccured = true;
                 request = HandleException(e, beginTime, request, 1);
             }
+            invalidateWorker = invalidateWorker || worker != null;
         } catch (org.drools.RuntimeDroolsException e) {
             errorOccured = true;
             request = HandleException(e, beginTime, request, 1);
+            invalidateWorker = true;
         } catch (java.sql.SQLException e) {
             errorOccured = true;
             request = HandleException(e, beginTime, request, 3);
+            invalidateWorker = true;
         } catch (Exception e) {
             errorOccured = true;
             request = HandleException(e, beginTime, request, 4);
+            invalidateWorker = true;
         } finally {
-            if (errorOccured) {
-                Logger.getLogger(AccumedValidatorWS.class.getName())
-                        .log(Level.SEVERE, ">>>>>>>>>>>>>>Invalidate WORKER because of an error...");
-                try {
-                    workerPool.invalidateObject(worker);
-                } catch (Exception ex) {
-                    Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
             if (returnThread == null) {
-                returnThread = new AccumedValidatorWS.ReturnThread(worker, conn);
-                returnFixedPool.submit(returnThread);
+                boolean shouldReleasePermit = workerPermitAcquired;
+                boolean shouldInvalidate = invalidateWorker && worker != null;
+                if (worker != null || conn != null || shouldReleasePermit) {
+                    returnThread = new AccumedValidatorWS.ReturnThread(worker, conn, shouldInvalidate, shouldReleasePermit);
+                    worker = null;
+                    conn = null;
+                    workerPermitAcquired = false;
+                    returnFixedPool.submit(returnThread);
             }
         }
+            if (workerPermitAcquired) {
+                releaseWorkerPermit();
+                workerPermitAcquired = false;}}
 
         return request;
     }
     private boolean checkMandatoryFields(long REQUEST_THREAD_UNIQUE_ID,com.accumed.model.scrubRequest.ScrubRequest request,long ltime)
     {
         LogInfo(REQUEST_THREAD_UNIQUE_ID, "Checking request.", System.currentTimeMillis() - ltime);
-        
+
 
         //Parse XML
         if (request.getHeader() == null || request.getClaim() == null) {
@@ -735,7 +1239,7 @@ public class AccumedValidatorWS {
             LogInfo(REQUEST_THREAD_UNIQUE_ID, "Provider is null.", System.currentTimeMillis() - ltime);
             accept=false;
         }
-         if ( request.getClaim().getPatient() != null )             
+         if ( request.getClaim().getPatient() != null )
          {
              if(request.getClaim().getPatient().getEmiratesId()==null)
              {
@@ -827,31 +1331,43 @@ public class AccumedValidatorWS {
             req.setClaim(null);
             req.setHeader(null);
             SaveThread saveThread = new SaveThread(req);
-            saveFixedPool.submit(saveThread);
+          //  saveFixedPool.submit(saveThread);
+            submitLoggingTask(saveThread);
         }
         return req;
 
     }
 
     protected class ReturnThread implements Runnable {
-
+        private final boolean invalidate;
+        private final boolean releasePermit;
         private Worker worker = null;
         private java.sql.Connection conn;
         final long RETURN_THREAD_UNIQUE_ID = RETURN_THREAD_NEXT_ID.getAndIncrement();
 
-        public ReturnThread(Worker worker, java.sql.Connection conn) {
+        public ReturnThread(Worker worker, java.sql.Connection conn, boolean invalidateWorker, boolean releasePermit) {
             Thread.currentThread().setPriority(Thread.MIN_PRIORITY);
             this.worker = worker;
             this.conn = conn;
+            this.invalidate = invalidateWorker;
+            this.releasePermit = releasePermit;
         }
+
 
         @Override
         public void run() {
             Logger.getLogger(ReturnThread.class.getName()).
                     log(Level.INFO, "ReturnThread started '{'{0}'}'", RETURN_THREAD_UNIQUE_ID);
             try {
-                workerPool.returnObject(worker);
-                
+                if (worker != null) {
+                    if (invalidate) {
+                        workerPool.invalidateObject(worker);
+                    } else {
+                        workerPool.returnObject(worker);
+                    }
+                }
+
+
                 Logger.getLogger(ReturnThread.class.getName()).
                         log(Level.INFO, "ReturnThread completed '{'{0}'}'", RETURN_THREAD_UNIQUE_ID);
 //                if (workerPool.getCount() < WORKERS_MIN_POOL_SIZE) {
@@ -877,6 +1393,9 @@ public class AccumedValidatorWS {
                         Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE, null, ex);
                         Statistics.addException(ex);
                     }
+                }
+                if (releasePermit) {
+                    releaseWorkerPermit();
                 }
             }
         }
@@ -906,12 +1425,12 @@ public class AccumedValidatorWS {
                 controller = new ScrubRequestJpaController();
 
                 controller.persist(req);
-               
+
                 Logger.getLogger(SaveThread.class.getName()).
                         log(Level.INFO, "SaveThread finish '{'{0}'}'{1}", new Object[]{SAVE_THREAD_UNIQUE_ID, (req != null && req.getClaim() != null && req.getClaim().getIdCaller() != null)
                     ? req.getClaim().getIdCaller() + ""
                     : 0 + ""});
-                
+
             } catch (org.drools.RuntimeDroolsException e) {
                 Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.SEVERE,
                         "exception caught", e);
@@ -1055,7 +1574,7 @@ public class AccumedValidatorWS {
         try {
             connection = getAccumedDB();
             if (connection != null) {
-              try{ 
+              try{
                   stmt = connection.createStatement();
                 rs = stmt.executeQuery("SELECT [ID], [ACCUMED_USER] ,[ACCUMED_PASSWORD] FROM [ACCUMED_FACILITY_USER]");
                 if (rs != null) {
@@ -1071,7 +1590,7 @@ public class AccumedValidatorWS {
               }catch (java.sql.SQLException ex) {
             Logger.getLogger(AccumedValidatorWS.class
                     .getName()).log(Level.SEVERE, "ACCUMED_FACILITY_USER  is  not  existed", ex);
-        } 
+        }
                 stmt = connection.createStatement();
                 rs = stmt.executeQuery("Select [USER_ID], [USER_NAME], [ENCRYPTED_PASSWORD] from NEO_USER where isDeleted <> 1");
                 if (rs != null) {
@@ -1309,27 +1828,43 @@ public class AccumedValidatorWS {
 
     @WebMethod(operationName = "GetPackages")
     public String GetPackages() {
-        JSONArray ret = null;
+        JSONArray ret = new JSONArray();
         boolean returned = true;
         Worker worker = null;
+        boolean workerPermitAcquired = false;
+        long requestThreadId = REQUEST_THREAD_NEXT_ID.getAndIncrement();
+        long startTimeInMillis = System.currentTimeMillis();
+        String sourceIp = resolveClientIpAddress();
+        recordRequestArrival(startTimeInMillis, sourceIp);
         try {
+            if (!tryAcquireWorkerPermit(requestThreadId, startTimeInMillis, "GetPackages", sourceIp)) {
+                Logger.getLogger(AccumedValidatorWS.class.getName()).log(Level.WARNING,
+                        "Unable to acquire worker permit for GetPackages request.");
+                return ret.toString();
+            }
+            workerPermitAcquired = true;
+
             worker = (Worker) workerPool.borrowObject();
             returned = false;
             ret = worker.GetPackages();
             workerPool.returnObject(worker);
             returned = true;
-
         } catch (Exception ex) {
             Logger.getLogger(AccumedValidatorWS.class
                     .getName()).log(Level.SEVERE, null, ex);
             try {
-                if (!returned) {
+                if (!returned && worker != null) {
                     workerPool.invalidateObject(worker);
-
+                    returned = true;
                 }
             } catch (Exception ex1) {
                 Logger.getLogger(AccumedValidatorWS.class
                         .getName()).log(Level.SEVERE, null, ex1);
+            }
+        } finally {
+            if (workerPermitAcquired) {
+                releaseWorkerPermit();
+                workerPermitAcquired = false;
             }
         }
         return ret.toString();
@@ -1552,22 +2087,22 @@ public class AccumedValidatorWS {
            case "AppointmentDesk":
                     req = breUtils.addExtendedValidationType(req, "DataEntry", Boolean.TRUE);
                      req = breUtils.addExtendedValidationType(req, "AppointmentDesk", Boolean.TRUE);
-              
+
                 break;
              case "Physician":
-                    req = breUtils.addExtendedValidationType(req, "Physician", Boolean.TRUE);              
-                break;  
+                    req = breUtils.addExtendedValidationType(req, "Physician", Boolean.TRUE);
+                break;
                  case "Insurance":
                     req = breUtils.addExtendedValidationType(req, "DataEntry", Boolean.TRUE);
                     req = breUtils.addExtendedValidationType(req, "Coding", Boolean.FALSE);
                     req = breUtils.addExtendedValidationType(req, "Auditing", Boolean.FALSE);
                     req = breUtils.addExtendedValidationType(req, "Billing", Boolean.FALSE);
                     req = breUtils.addExtendedValidationType(req, "Submission", Boolean.FALSE);
-                    req.setRestrictPackages("authorization,mnec_coding,mnec_crosswalk");              
-                break;   
+                    req.setRestrictPackages("authorization,mnec_coding,mnec_crosswalk");
+                break;
             case "Nurse":
-                    req = breUtils.addExtendedValidationType(req, "Nurse", Boolean.TRUE);              
-                break;    
+                    req = breUtils.addExtendedValidationType(req, "Nurse", Boolean.TRUE);
+                break;
             case "EHR":
                 req = breUtils.addExtendedValidationType(req, "DataEntry", Boolean.TRUE);
                 req = breUtils.addExtendedValidationType(req, "Coding", Boolean.FALSE);
@@ -2087,7 +2622,7 @@ public class AccumedValidatorWS {
         java.sql.ResultSet rs = null;
         java.sql.Statement stmt = null;
 
-         
+
         ruleRefrences.clear();
 
         try {
@@ -2101,7 +2636,7 @@ public class AccumedValidatorWS {
                 if (rs != null) {
                     while (rs.next()) {
                         Integer ID = rs.getInt("ID");
-                        String ruleName = rs.getString("ruleName");                        
+                        String ruleName = rs.getString("ruleName");
                         String reference = rs.getString("reference");
                         String createdBy = rs.getString("createdBy");
                         Boolean deleted = rs.getBoolean("deleted");

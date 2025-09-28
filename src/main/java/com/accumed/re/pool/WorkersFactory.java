@@ -8,6 +8,8 @@ package com.accumed.re.pool;
 import com.accumed.re.agents.CachedRepositoryService;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import com.accumed.re.agents.repo.SharedCachedRepository;
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
@@ -63,7 +65,9 @@ public class WorkersFactory extends BasePooledObjectFactory<Worker> {
         Logger.getLogger(WorkersFactory.class.getName()).
                 log(Level.INFO, "id:{0}::validateObject ....",
                         new Object[]{p.getObject().getUniqueId()});
-        if (p.getObject().getRepoTimeStamp().before(cachedRepositoryService.getRepo().getTimeStamp())) {
+       // if (p.getObject().getRepoTimeStamp().before(cachedRepositoryService.getRepo().getTimeStamp())) {
+        java.util.Date sharedTimestamp = SharedCachedRepository.getTimestamp();
+        if (sharedTimestamp != null && p.getObject().getRepoTimeStamp().before(sharedTimestamp)) {
             Logger.getLogger(WorkersFactory.class.getName()).
                     log(Level.INFO, "id'{'{0}'}'::worker invalid reason: change in DB.", p.getObject().getUniqueId());
             ret = false;

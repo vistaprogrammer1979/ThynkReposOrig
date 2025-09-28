@@ -19,6 +19,7 @@ import org.drools.KnowledgeBase;
 import org.drools.definition.rule.Rule;
 import org.drools.runtime.StatefulKnowledgeSession;
 import org.drools.runtime.rule.FactHandle;
+import java.util.concurrent.TimeUnit;
 
 /**
  *
@@ -254,7 +255,7 @@ public class Validator {
             return req;  //package is not loaded
         }
 
-        long lBegin = 0;
+        long validationStart = System.nanoTime();
         try {
             
 
@@ -277,15 +278,12 @@ public class Validator {
                         severityType <= com.accumed.model.Severity.getiFINEST(); severityType++) {
                     for (int rankcnt = 0; rankcnt < 60; rankcnt++) {
                         Logger.getLogger(Validator.class.getName()).log(Level.INFO, "{0}. Starting Rank={1}, Type={2})", new Object[]{getName(), rankcnt, severityType,});
-                        lBegin = System.nanoTime();
+                        long iterationStart = System.nanoTime();
                         this.fhControlRank = session.insert(new ControlRank(severityType, rankcnt));
                         session.fireAllRules();
-//                        try {
-//                            Thread.currentThread().sleep(50);
-//                        } catch (InterruptedException e) {
-//                        }
+                    long iterationElapsedNanos = System.nanoTime() - iterationStart;
                         Logger.getLogger(Validator.class.getName()).log(Level.INFO, "{0}. Rank={1}, Type={2}, validate Done({3}ns)", new Object[]{getName(), rankcnt, severityType,
-                            (new Long((System.nanoTime() - lBegin))).toString()});
+                                Long.toString(iterationElapsedNanos)});
                         session.retract(this.fhControlRank);
                     }
                 }
@@ -294,12 +292,9 @@ public class Validator {
                 session.fireAllRules();
             }
 
-            Logger.getLogger(Validator.class.getName()).log(Level.INFO, "{0}.validate Done({1}ms)", new Object[]{getName(), (new Long((System.nanoTime() - lBegin) / 1000000)).toString()});
-        } /*catch(java.lang.reflect.InvocationTargetException e){
-            Statistics.addException(e, req);
-            Logger.getLogger(MnecValidator.class.getName()).log(Level.SEVERE, e.getMessage(), e);
-            throw e;
-        }*/ catch (org.drools.runtime.rule.ConsequenceException e) {
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - validationStart);
+            Logger.getLogger(Validator.class.getName()).log(Level.INFO, "{0}.validate Done({1}ms)", new Object[]{getName(), Long.toString(elapsedMillis)});
+        } catch (org.drools.runtime.rule.ConsequenceException e) {
             Statistics.addException(e, req);
             Logger.getLogger(Validator.class.getName()).log(Level.SEVERE, e.getMessage(), e);
             throw e;
@@ -316,8 +311,8 @@ public class Validator {
         }
         Utils.setReferenceLinks(req, AccumedValidatorWS.ruleRefrences );
         Utils.addPackageNameToOutcome(req, Utils.getPackageTradeName(this.getName()),getPackageRules() );
-        Logger.getLogger(Validator.class.getName()).log(Level.INFO, "entering {0}.validate Done2({1}ms)", new Object[]{getName(), (new Long((System.nanoTime() - lBegin) / 1000000)).toString()});
-        
+        long totalElapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - validationStart);
+        Logger.getLogger(Validator.class.getName()).log(Level.INFO, "entering {0}.validate Done2({1}ms)", new Object[]{getName(), Long.toString(totalElapsedMillis)});
         return req;
     } 
     private List<String> getPackageRules()

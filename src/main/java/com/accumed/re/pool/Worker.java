@@ -16,6 +16,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
+
+import com.accumed.re.agents.repo.SharedCachedRepository;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -93,7 +95,12 @@ public class Worker {
             Logger.getLogger(Worker.class.getName()).log(Level.SEVERE, "Important: Worker Constructor Exception-->Cached Repository Service is not set...");
             return;
         }
-        repo = Worker.cachedRepositoryService.getRepo();
+       // repo = Worker.cachedRepositoryService.getRepo();
+        repo = SharedCachedRepository.get();
+        if (repo == null && Worker.cachedRepositoryService != null) {
+            repo = Worker.cachedRepositoryService.getRepo();
+            SharedCachedRepository.set(repo);
+        }
 //        if (repo == null || !repo.isValid()) {
         if (repo == null) {
             //Logger.getLogger(Worker.class.getName()).log(Level.SEVERE, "Cached Repository is not set or invalid...");
